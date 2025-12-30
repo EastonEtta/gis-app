@@ -32,6 +32,66 @@
         #controls {
             display: flex;
             gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .layer-toggle {
+            background: #27ae60;
+        }
+        .layer-toggle:hover {
+            background: #229954;
+        }
+        .layer-toggle.active {
+            background: #e74c3c;
+        }
+        #wildfire-panel {
+            position: absolute;
+            top: 80px;
+            left: 20px;
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 1000;
+            max-width: 300px;
+            display: none;
+        }
+        #wildfire-panel.active {
+            display: block;
+        }
+        .alert-item {
+            padding: 0.75rem;
+            margin: 0.5rem 0;
+            border-radius: 4px;
+            border-left: 4px solid;
+        }
+        .alert-extreme {
+            background: #ffebee;
+            border-color: #8B0000;
+        }
+        .alert-high {
+            background: #fff3e0;
+            border-color: #FF4500;
+        }
+        .stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        .stat-box {
+            background: #f5f5f5;
+            padding: 0.5rem;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .stat-number {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #e74c3c;
+        }
+        .stat-label {
+            font-size: 0.75rem;
+            color: #7f8c8d;
         }
         button {
             background: #3498db;
@@ -117,10 +177,20 @@
             <button onclick="toggleAddPoint()">Add Point</button>
             <button onclick="loadPoints()">Refresh</button>
             <button onclick="exportGeoJSON()">Export GeoJSON</button>
+            <button class="layer-toggle" onclick="toggleWildfireLayer()">🔥 Wildfire Risk</button>
         </div>
     </div>
     
     <div id="map"></div>
+    
+    <div id="wildfire-panel">
+        <h3 style="margin-bottom: 1rem; color: #e74c3c;">🔥 Wildfire Risk - Texas</h3>
+        <div id="wildfire-stats"></div>
+        <div id="wildfire-alerts"></div>
+        <button onclick="refreshWildfireData()" style="width: 100%; margin-top: 1rem;">
+            Refresh Data
+        </button>
+    </div>
     
     <div id="sidebar">
         <button class="close-btn" onclick="toggleAddPoint()">×</button>
@@ -145,7 +215,7 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <script>
-        const API_URL = 'https://gis-app-production.up.railway.app/api';
+        const API_URL = 'http://localhost:3000/api';
         
         // Initialize map
         const map = L.map('map').setView([40.7128, -74.0060], 10);
@@ -156,6 +226,8 @@
         }).addTo(map);
         
         let pointsLayer = L.layerGroup().addTo(map);
+        let wildfireLayer = L.layerGroup();
+        let wildfireLayerActive = false;
         let addingPoint = false;
         
         function toggleAddPoint() {
@@ -290,9 +362,134 @@
         
         // Load points on startup
         loadPoints();
+        
+        // Wildfire layer functions
+        async function toggleWildfireLayer() {
+            wildfireLayerActive = !wildfireLayerActive;
+            
+            const btn = document.querySelector('.layer-toggle');
+            const panel = document.getElementById('wildfire-panel');
+            
+            if (wildfireLayerActive) {
+                btn.classList.add('active');
+                btn.textContent = '🔥 Hide Wildfire';
+                panel.classList.add('active');
+                wildfireLayer.addTo(map);
+                await loadWildfireData();
+                map.setView([31.0, -100.0], 6); // Center on Texas
+            } else {
+                btn.classList.remove('active');
+                btn.textContent = '🔥 Wildfire Risk';
+                panel.classList.remove('active');
+                wildfireLayer.clearLayers();
+            }
+        }
+        
+        async function loadWildfireData() {
+            try {
+                // Load risk data
+                const riskResponse = await fetch(`${API_URL}/wildfire/risk`);
+                const riskData = await riskResponse.json();
+                
+                // Load stats
+                const statsResponse = await fetch(`${API_URL}/wildfire/stats`);
+                const stats = await statsResponse.json();
+                
+                // Load alerts
+                const alertsResponse = await fetch(`${API_URL}/wildfire/alerts`);
+                const alertsData = await alertsResponse.json();
+                
+                // Clear existing layers
+                wildfireLayer.clearLayers();
+                
+                // Add risk zones and fires to map
+                riskData.features.forEach(feature => {
+                    const props = feature.properties;
+                    const coords = feature.geometry.coordinates;
+                    
+                    if (props.type === 'active_fire') {
+                        // Show active fires as red markers
+                        L.circleMarker([coords[1], coords[0]], {
+                            radius: 8,
+                            fillColor: '#FF0000',
+                            color: '#8B0000',
+                            weight: 2,
+                            opacity: 1,
+                            fillOpacity: 0.8
+                        }).bindPopup(`
+                            <strong>🔥 Active Fire</strong><br>
+                            Confidence: ${props.confidence}<br>
+                            Brightness: ${props.brightness}<br>
+                            Date: ${props.acq_date}
+                        `).addTo(wildfireLayer);
+                    } else if (props.type === 'weather_risk') {
+                        // Show risk zones as circles
+                        L.circle([coords[1], coords[0]], {
+                            radius: props.radius_km * 1000,
+                            fillColor: props.color,
+                            color: props.color,
+                            weight: 2,
+                            opacity: 0.5,
+                            fillOpacity: 0.2
+                        }).bindPopup(`
+                            <strong>${props.location}</strong><br>
+                            Risk Level: <strong style="color: ${props.color}">${props.risk_level.toUpperCase()}</strong><br>
+                            Temperature: ${props.temperature}°F<br>
+                            Humidity: ${props.humidity}%<br>
+                            Wind Speed: ${props.wind_speed} mph<br>
+                            Risk Score: ${props.risk_score}/100
+                        `).addTo(wildfireLayer);
+                    }
+                });
+                
+                // Update stats panel
+                const statsDiv = document.getElementById('wildfire-stats');
+                statsDiv.innerHTML = `
+                    <div class="stat-grid">
+                        <div class="stat-box">
+                            <div class="stat-number">${stats.active_fires}</div>
+                            <div class="stat-label">Active Fires</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-number">${stats.risk_zones.extreme}</div>
+                            <div class="stat-label">Extreme Risk</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-number">${stats.risk_zones.high}</div>
+                            <div class="stat-label">High Risk</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-number">${stats.risk_zones.moderate}</div>
+                            <div class="stat-label">Moderate Risk</div>
+                        </div>
+                    </div>
+                `;
+                
+                // Update alerts
+                const alertsDiv = document.getElementById('wildfire-alerts');
+                if (alertsData.alerts.length > 0) {
+                    alertsDiv.innerHTML = '<h4 style="margin-top: 1rem;">Active Alerts:</h4>' +
+                        alertsData.alerts.map(alert => `
+                            <div class="alert-item alert-${alert.level}">
+                                <strong>${alert.location}</strong><br>
+                                <small>${alert.message}</small>
+                            </div>
+                        `).join('');
+                } else {
+                    alertsDiv.innerHTML = '<p style="margin-top: 1rem; color: #27ae60;">No active alerts</p>';
+                }
+                
+            } catch (error) {
+                console.error('Error loading wildfire data:', error);
+                alert('Failed to load wildfire data. Make sure the API is running.');
+            }
+        }
+        
+        async function refreshWildfireData() {
+            if (wildfireLayerActive) {
+                await loadWildfireData();
+            }
+        }
     </script>
 </body>
-
 </html>
-
-
