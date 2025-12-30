@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GIS Application</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        #header {
+            background: #2c3e50;
+            color: white;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            font-size: 1.5rem;
+        }
+        #controls {
+            display: flex;
+            gap: 1rem;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        #map {
+            flex: 1;
+            width: 100%;
+        }
+        #sidebar {
+            position: absolute;
+            top: 80px;
+            right: 20px;
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 1000;
+            max-width: 300px;
+            display: none;
+        }
+        #sidebar.active {
+            display: block;
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        label {
+            display: block;
+            margin-bottom: 0.3rem;
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        #submit-point {
+            width: 100%;
+            margin-top: 0.5rem;
+        }
+        .close-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #e74c3c;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border-radius: 50%;
+            font-size: 1rem;
+            line-height: 1;
+        }
+        .close-btn:hover {
+            background: #c0392b;
+        }
+        .leaflet-popup-content {
+            margin: 1rem;
+        }
+        .popup-title {
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+            color: #2c3e50;
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>🗺️ GIS Application</h1>
+        <div id="controls">
+            <button onclick="toggleAddPoint()">Add Point</button>
+            <button onclick="loadPoints()">Refresh</button>
+            <button onclick="exportGeoJSON()">Export GeoJSON</button>
+        </div>
+    </div>
+    
+    <div id="map"></div>
+    
+    <div id="sidebar">
+        <button class="close-btn" onclick="toggleAddPoint()">×</button>
+        <h3 style="margin-bottom: 1rem; color: #2c3e50;">Add New Point</h3>
+        <div class="form-group">
+            <label for="point-name">Name:</label>
+            <input type="text" id="point-name" placeholder="Enter point name">
+        </div>
+        <div class="form-group">
+            <label for="point-lat">Latitude:</label>
+            <input type="number" id="point-lat" step="0.000001" placeholder="e.g., 40.7128">
+        </div>
+        <div class="form-group">
+            <label for="point-lon">Longitude:</label>
+            <input type="number" id="point-lon" step="0.000001" placeholder="e.g., -74.0060">
+        </div>
+        <button id="submit-point" onclick="submitPoint()">Add Point</button>
+        <p style="margin-top: 1rem; font-size: 0.85rem; color: #7f8c8d;">
+            Or click on the map to place a point
+        </p>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script>
+        const API_URL = 'http://localhost:3000/api';
+        
+        // Initialize map
+        const map = L.map('map').setView([40.7128, -74.0060], 10);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(map);
+        
+        let pointsLayer = L.layerGroup().addTo(map);
+        let addingPoint = false;
+        
+        function toggleAddPoint() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('active');
+            addingPoint = sidebar.classList.contains('active');
+        }
+        
+        async function loadPoints() {
+            try {
+                const response = await fetch(`${API_URL}/points`);
+                const data = await response.json();
+                
+                pointsLayer.clearLayers();
+                
+                if (data.features && data.features.length > 0) {
+                    const geoJsonLayer = L.geoJSON(data, {
+                        pointToLayer: (feature, latlng) => {
+                            return L.circleMarker(latlng, {
+                                radius: 8,
+                                fillColor: '#3498db',
+                                color: '#fff',
+                                weight: 2,
+                                opacity: 1,
+                                fillOpacity: 0.8
+                            });
+                        },
+                        onEachFeature: (feature, layer) => {
+                            const props = feature.properties;
+                            const content = `
+                                <div class="popup-title">${props.name}</div>
+                                <div>ID: ${feature.id}</div>
+                                <div>Lat: ${feature.geometry.coordinates[1].toFixed(6)}</div>
+                                <div>Lon: ${feature.geometry.coordinates[0].toFixed(6)}</div>
+                                <button onclick="deletePoint(${feature.id})" 
+                                        style="margin-top: 0.5rem; background: #e74c3c;">
+                                    Delete
+                                </button>
+                            `;
+                            layer.bindPopup(content);
+                        }
+                    });
+                    
+                    pointsLayer.addLayer(geoJsonLayer);
+                    map.fitBounds(geoJsonLayer.getBounds(), { padding: [50, 50] });
+                }
+            } catch (error) {
+                console.error('Error loading points:', error);
+                alert('Failed to load points. Make sure the API is running.');
+            }
+        }
+        
+        async function submitPoint() {
+            const name = document.getElementById('point-name').value;
+            const lat = parseFloat(document.getElementById('point-lat').value);
+            const lon = parseFloat(document.getElementById('point-lon').value);
+            
+            if (!name || isNaN(lat) || isNaN(lon)) {
+                alert('Please fill in all fields');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_URL}/points`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        latitude: lat,
+                        longitude: lon,
+                        properties: {}
+                    })
+                });
+                
+                if (response.ok) {
+                    document.getElementById('point-name').value = '';
+                    document.getElementById('point-lat').value = '';
+                    document.getElementById('point-lon').value = '';
+                    toggleAddPoint();
+                    loadPoints();
+                } else {
+                    alert('Failed to add point');
+                }
+            } catch (error) {
+                console.error('Error adding point:', error);
+                alert('Failed to add point. Make sure the API is running.');
+            }
+        }
+        
+        async function deletePoint(id) {
+            if (!confirm('Delete this point?')) return;
+            
+            try {
+                const response = await fetch(`${API_URL}/points/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    loadPoints();
+                } else {
+                    alert('Failed to delete point');
+                }
+            } catch (error) {
+                console.error('Error deleting point:', error);
+                alert('Failed to delete point');
+            }
+        }
+        
+        function exportGeoJSON() {
+            fetch(`${API_URL}/points`)
+                .then(res => res.json())
+                .then(data => {
+                    const blob = new Blob([JSON.stringify(data, null, 2)], 
+                        { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'points.geojson';
+                    a.click();
+                });
+        }
+        
+        // Click on map to add point
+        map.on('click', (e) => {
+            if (addingPoint) {
+                document.getElementById('point-lat').value = e.latlng.lat.toFixed(6);
+                document.getElementById('point-lon').value = e.latlng.lng.toFixed(6);
+            }
+        });
+        
+        // Load points on startup
+        loadPoints();
+    </script>
+</body>
+</html>
