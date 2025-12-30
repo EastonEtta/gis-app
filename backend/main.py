@@ -339,85 +339,144 @@ async def get_active_fires_texas():
 
 async def get_weather_risk_texas():
     """
-    Get weather-based fire risk for Texas regions
+    Get weather-based fire risk for Texas regions using a grid pattern
     Using Open-Meteo API (free, no key required)
     """
-    # Major Texas cities as sample points
-    texas_cities = [
-        {"name": "Dallas", "lat": 32.7767, "lon": -96.7970},
-        {"name": "Houston", "lat": 29.7604, "lon": -95.3698},
-        {"name": "Austin", "lat": 30.2672, "lon": -97.7431},
-        {"name": "San Antonio", "lat": 29.4241, "lon": -98.4936},
-        {"name": "El Paso", "lat": 31.7619, "lon": -106.4850},
-        {"name": "Lubbock", "lat": 33.5779, "lon": -101.8552},
-        {"name": "Amarillo", "lat": 35.2220, "lon": -101.8313},
-        {"name": "Midland", "lat": 31.9973, "lon": -102.0779}
-    ]
+    # Create a grid of sample points across Texas
+    # Spacing of 1.5 degrees = ~100 miles between points = ~50 points total
+    grid_points = []
+    
+    # Texas bounding box
+    min_lat, max_lat = 26.0, 36.5
+    min_lon, max_lon = -106.5, -93.5
+    
+    # Create grid
+    lat = min_lat
+    while lat <= max_lat:
+        lon = min_lon
+        while lon <= max_lon:
+            grid_points.append({
+                "name": f"Grid_{len(grid_points)}",
+                "lat": round(lat, 2),
+                "lon": round(lon, 2)
+            })
+            lon += 1.5  # ~100 miles spacing
+        lat += 1.5
+    
+    print(f"Sampling {len(grid_points)} points across Texas...")
     
     weather_risks = []
     
     async with httpx.AsyncClient(timeout=30.0) as client:
-        for city in texas_cities:
+        # Process in batches to avoid overwhelming the API
+        for point in grid_points:
             try:
                 # Get weather data from Open-Meteo
-                url = f"https://api.open-meteo.com/v1/forecast?latitude={city['lat']}&longitude={city['lon']}&current=temperature_2m,relative_humidity_2m,wind_speed_10m&temperature_unit=fahrenheit&wind_speed_unit=mph"
+                url = f"https://api.open-meteo.com/v1/forecast?latitude={point['lat']}&longitude={point['lon']}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation&temperature_unit=fahrenheit&wind_speed_unit=mph"
                 
                 response = await client.get(url)
                 if response.status_code == 200:
                     data = response.json()
                     current = data.get("current", {})
                     
-                    # Calculate fire risk based on conditions
-                    temp = current.get("temperature_2m", 0)
-                    humidity = current.get("relative_humidity_2m", 100)
-                    wind_speed = current.get("wind_speed_10m", 0)
+                    # Get weather values
+                    temp = current.get("temperature_2m", 70)
+                    humidity = current.get("relative_humidity_2m", 50)
+                    wind_speed = current.get("wind_speed_10m", 5)
+                    precipitation = current.get("precipitation", 0)
                     
-                    # Fire risk formula (simplified)
-                    # High temp + Low humidity + High wind = High risk
+                    # FIRE RISK CALCULATION FORMULA:
+                    # Based on Fire Weather Index principles
+                    
                     risk_score = 0
-                    if temp > 85: risk_score += 30
-                    if temp > 95: risk_score += 20
-                    if humidity < 30: risk_score += 30
-                    if humidity < 15: risk_score += 20
-                    if wind_speed > 15: risk_score += 20
-                    if wind_speed > 25: risk_score += 30
                     
-                    # Determine risk level
-                    if risk_score >= 70:
+                    # 1. TEMPERATURE FACTOR (max 40 points)
+                    # Higher temps dry out vegetation and increase fire intensity
+                    if temp > 75:
+                        risk_score += 10
+                    if temp > 85:
+                        risk_score += 15  # Total: 25
+                    if temp > 95:
+                        risk_score += 15  # Total: 40
+                    
+                    # 2. HUMIDITY FACTOR (max 35 points)
+                    # Low humidity = dry conditions = fires spread faster
+                    if humidity < 40:
+                        risk_score += 10
+                    if humidity < 25:
+                        risk_score += 15  # Total: 25
+                    if humidity < 15:
+                        risk_score += 10  # Total: 35
+                    
+                    # 3. WIND FACTOR (max 30 points)
+                    # Wind spreads fires and makes them unpredictable
+                    if wind_speed > 10:
+                        risk_score += 10
+                    if wind_speed > 20:
+                        risk_score += 10  # Total: 20
+                    if wind_speed > 30:
+                        risk_score += 10  # Total: 30
+                    
+                    # 4. PRECIPITATION PENALTY (reduces risk)
+                    # Recent rain = wet vegetation = lower fire risk
+                    if precipitation > 0:
+                        risk_score -= 20  # Recent rain reduces risk
+                    
+                    # Keep score in 0-100 range
+                    risk_score = max(0, min(100, risk_score))
+                    
+                    # Determine risk level and color
+                    # RISK LEVELS:
+                    # 0-25: LOW (green)
+                    # 26-50: MODERATE (yellow/orange)  
+                    # 51-75: HIGH (orange/red)
+                    # 76-100: EXTREME (dark red)
+                    
+                    if risk_score >= 76:
                         risk_level = "extreme"
-                        color = "#8B0000"
-                    elif risk_score >= 50:
+                        color = "#8B0000"  # Dark red
+                        radius_km = 60
+                    elif risk_score >= 51:
                         risk_level = "high"
-                        color = "#FF4500"
-                    elif risk_score >= 30:
+                        color = "#FF4500"  # Orange-red
+                        radius_km = 50
+                    elif risk_score >= 26:
                         risk_level = "moderate"
-                        color = "#FFA500"
+                        color = "#FFA500"  # Orange
+                        radius_km = 40
                     else:
                         risk_level = "low"
-                        color = "#90EE90"
+                        color = "#90EE90"  # Light green
+                        radius_km = 30
                     
                     weather_risks.append({
                         "type": "Feature",
                         "geometry": {
                             "type": "Point",
-                            "coordinates": [city["lon"], city["lat"]]
+                            "coordinates": [point["lon"], point["lat"]]
                         },
                         "properties": {
                             "type": "weather_risk",
-                            "location": city["name"],
+                            "location": f"Grid Point ({point['lat']}, {point['lon']})",
                             "risk_level": risk_level,
                             "risk_score": risk_score,
                             "color": color,
-                            "temperature": temp,
-                            "humidity": humidity,
-                            "wind_speed": wind_speed
+                            "temperature": round(temp, 1),
+                            "humidity": round(humidity, 1),
+                            "wind_speed": round(wind_speed, 1),
+                            "precipitation": round(precipitation, 2),
+                            "radius_km": radius_km
                         }
                     })
                     
             except Exception as e:
-                print(f"Error fetching weather for {city['name']}: {e}")
+                print(f"Error fetching weather for point {point}: {e}")
                 continue
+            
+            # Small delay to be nice to the API
+            await asyncio.sleep(0.1)
     
+    print(f"Successfully retrieved {len(weather_risks)} risk zones")
     return weather_risks
 
 def calculate_risk_zones(fires: List[Dict], weather_risk: List[Dict]) -> List[Dict]:
@@ -504,4 +563,5 @@ async def get_wildfire_stats():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
