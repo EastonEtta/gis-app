@@ -45,19 +45,19 @@ async def startup_event():
     conn = get_db_connection()
     cur = conn.cursor()
     
-    # Create points table with PostGIS
+    # Create points table WITHOUT PostGIS (simpler for deployment)
     cur.execute("""
-        CREATE EXTENSION IF NOT EXISTS postgis;
-        
         CREATE TABLE IF NOT EXISTS points (
             id SERIAL PRIMARY KEY,
             name VARCHAR(255),
-            geom GEOMETRY(Point, 4326),
+            latitude DOUBLE PRECISION,
+            longitude DOUBLE PRECISION,
             properties JSONB,
             created_at TIMESTAMP DEFAULT NOW()
         );
         
-        CREATE INDEX IF NOT EXISTS points_geom_idx ON points USING GIST(geom);
+        CREATE INDEX IF NOT EXISTS points_lat_idx ON points(latitude);
+        CREATE INDEX IF NOT EXISTS points_lon_idx ON points(longitude);
     """)
     
     conn.commit()
@@ -83,10 +83,10 @@ async def create_point(point: PointFeature):
     cur = conn.cursor()
     
     cur.execute("""
-        INSERT INTO points (name, geom, properties)
-        VALUES (%s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s)
-        RETURNING id, name, ST_AsGeoJSON(geom)::json as geometry, properties
-    """, (point.name, point.longitude, point.latitude, json.dumps(point.properties)))
+        INSERT INTO points (name, latitude, longitude, properties)
+        VALUES (%s, %s, %s, %s)
+        RETURNING id, name, latitude, longitude, properties
+    """, (point.name, point.latitude, point.longitude, json.dumps(point.properties)))
     
     result = cur.fetchone()
     conn.commit()
@@ -96,7 +96,10 @@ async def create_point(point: PointFeature):
     return {
         "type": "Feature",
         "id": result["id"],
-        "geometry": result["geometry"],
+        "geometry": {
+            "type": "Point",
+            "coordinates": [result["longitude"], result["latitude"]]
+        },
         "properties": {
             "name": result["name"],
             **result["properties"]
@@ -113,7 +116,8 @@ async def get_points():
         SELECT 
             id,
             name,
-            ST_AsGeoJSON(geom)::json as geometry,
+            latitude,
+            longitude,
             properties
         FROM points
         ORDER BY created_at DESC
@@ -124,7 +128,10 @@ async def get_points():
         features.append({
             "type": "Feature",
             "id": row["id"],
-            "geometry": row["geometry"],
+            "geometry": {
+                "type": "Point",
+                "coordinates": [row["longitude"], row["latitude"]]
+            },
             "properties": {
                 "name": row["name"],
                 **row["properties"]
@@ -154,18 +161,23 @@ async def get_points_in_bbox(
         SELECT 
             id,
             name,
-            ST_AsGeoJSON(geom)::json as geometry,
+            latitude,
+            longitude,
             properties
         FROM points
-        WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
-    """, (minx, miny, maxx, maxy))
+        WHERE longitude >= %s AND longitude <= %s
+          AND latitude >= %s AND latitude <= %s
+    """, (minx, maxx, miny, maxy))
     
     features = []
     for row in cur.fetchall():
         features.append({
             "type": "Feature",
             "id": row["id"],
-            "geometry": row["geometry"],
+            "geometry": {
+                "type": "Point",
+                "coordinates": [row["longitude"], row["latitude"]]
+            },
             "properties": {
                 "name": row["name"],
                 **row["properties"]
@@ -215,10 +227,11 @@ async def upload_geojson(file: UploadFile = File(...)):
         
         if geom.get("type") == "Point":
             coords = geom.get("coordinates")
+            lon, lat = coords[0], coords[1]
             cur.execute("""
-                INSERT INTO points (name, geom, properties)
-                VALUES (%s, ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326), %s)
-            """, (name, json.dumps(geom), json.dumps(props)))
+                INSERT INTO points (name, latitude, longitude, properties)
+                VALUES (%s, %s, %s, %s)
+            """, (name, lat, lon, json.dumps(props)))
             imported += 1
     
     conn.commit()
