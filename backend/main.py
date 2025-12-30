@@ -246,6 +246,14 @@ async def upload_geojson(file: UploadFile = File(...)):
         "message": f"Imported {imported} features",
         "count": imported
     }
+# Add these imports at the top of main.py
+import httpx
+from datetime import datetime, timedelta
+from typing import Dict, List
+import asyncio
+
+# Add these endpoints to your FastAPI app
+
 @app.get("/api/wildfire/risk")
 async def get_wildfire_risk():
     """
@@ -413,17 +421,17 @@ async def get_weather_risk_texas():
                     # Temperature factor (max 40)
                     if temp > 75: risk_score += 10
                     if temp > 85: risk_score += 15
-                    if temp > 95: risk_score += 30
+                    if temp > 95: risk_score += 15
                     
                     # Humidity factor (max 35)
                     if humidity < 40: risk_score += 10
                     if humidity < 25: risk_score += 15
-                    if humidity < 15: risk_score += 20
+                    if humidity < 15: risk_score += 10
                     
                     # Wind factor (max 30)
                     if wind_speed > 10: risk_score += 10
-                    if wind_speed > 20: risk_score += 30
-                    if wind_speed > 30: risk_score += 40
+                    if wind_speed > 20: risk_score += 10
+                    if wind_speed > 30: risk_score += 10
                     
                     # Precipitation penalty
                     if precipitation > 0: risk_score -= 20
@@ -536,44 +544,26 @@ async def get_wildfire_alerts():
 @app.get("/api/wildfire/counties")
 async def get_texas_counties_geojson():
     """
-    Get simplified Texas county boundaries as GeoJSON
-    This is a minimal subset for demo - in production use full county shapefile
+    Fetch and return Texas county boundaries as GeoJSON
+    Acts as a proxy to avoid CORS issues
     """
-    # Simplified county boundaries (using approximate bounding boxes)
-    # In production, you'd load actual county shapefiles
-    counties_geojson = {
-        "type": "FeatureCollection",
-        "features": []
-    }
-    
-    # Major counties with approximate boundaries
-    major_counties = [
-        {"name": "Harris", "bounds": [[-95.8, 29.5], [-95.0, 30.2]]},
-        {"name": "Dallas", "bounds": [[-97.1, 32.5], [-96.4, 33.0]]},
-        {"name": "Bexar", "bounds": [[-98.9, 29.1], [-98.2, 29.8]]},
-        {"name": "Travis", "bounds": [[-98.2, 30.0], [-97.4, 30.6]]},
-        {"name": "Tarrant", "bounds": [[-97.6, 32.5], [-96.9, 33.1]]},
-    ]
-    
-    for county in major_counties:
-        # Create a simple rectangle polygon for each county
-        bounds = county["bounds"]
-        counties_geojson["features"].append({
-            "type": "Feature",
-            "properties": {"name": county["name"]},
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[
-                    [bounds[0][0], bounds[0][1]],  # SW corner
-                    [bounds[1][0], bounds[0][1]],  # SE corner
-                    [bounds[1][0], bounds[1][1]],  # NE corner
-                    [bounds[0][0], bounds[1][1]],  # NW corner
-                    [bounds[0][0], bounds[0][1]]   # Close polygon
-                ]]
-            }
-        })
-    
-    return counties_geojson
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            response = await client.get('https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json')
+            if response.status_code == 200:
+                all_counties = response.json()
+                
+                # Filter for Texas counties (FIPS codes 48xxx)
+                texas_counties = {
+                    "type": "FeatureCollection",
+                    "features": [f for f in all_counties["features"] if f.get("id", "").startswith("48")]
+                }
+                
+                return texas_counties
+            else:
+                raise HTTPException(status_code=500, detail="Failed to fetch county data")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error fetching counties: {str(e)}")
 
 @app.get("/api/wildfire/stats")
 async def get_wildfire_stats():
@@ -599,6 +589,7 @@ async def get_wildfire_stats():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
