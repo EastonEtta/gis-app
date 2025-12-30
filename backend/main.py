@@ -339,144 +339,138 @@ async def get_active_fires_texas():
 
 async def get_weather_risk_texas():
     """
-    Get weather-based fire risk for Texas regions using a grid pattern
-    Using Open-Meteo API (free, no key required)
+    Get weather-based fire risk for Texas counties
+    Using county centroids and Open-Meteo API (free, no key required)
+    Returns county names with FIPS codes for proper matching
     """
-    # Create a grid of sample points across Texas
-    # Spacing of 1.5 degrees = ~100 miles between points = ~50 points total
-    grid_points = []
+    # Texas counties with their centroids (lat/lon) and FIPS codes
+    # FIPS format: 48XXX where 48 = Texas
+    texas_counties = [
+        {"name": "Harris", "fips": "48201", "lat": 29.8580, "lon": -95.3885},
+        {"name": "Dallas", "fips": "48113", "lat": 32.7668, "lon": -96.7780},
+        {"name": "Tarrant", "fips": "48439", "lat": 32.7555, "lon": -97.3308},
+        {"name": "Bexar", "fips": "48029", "lat": 29.4498, "lon": -98.5254},
+        {"name": "Travis", "fips": "48453", "lat": 30.3323, "lon": -97.7663},
+        {"name": "Collin", "fips": "48085", "lat": 33.1886, "lon": -96.5733},
+        {"name": "El Paso", "fips": "48141", "lat": 31.8113, "lon": -106.3505},
+        {"name": "Denton", "fips": "48121", "lat": 33.2115, "lon": -97.1331},
+        {"name": "Fort Bend", "fips": "48157", "lat": 29.5696, "lon": -95.7603},
+        {"name": "Montgomery", "fips": "48339", "lat": 30.3158, "lon": -95.5016},
+        {"name": "Williamson", "fips": "48491", "lat": 30.6580, "lon": -97.6726},
+        {"name": "Hidalgo", "fips": "48215", "lat": 26.3424, "lon": -98.1615},
+        {"name": "Nueces", "fips": "48355", "lat": 27.7305, "lon": -97.5934},
+        {"name": "Cameron", "fips": "48061", "lat": 26.1315, "lon": -97.4450},
+        {"name": "Brazoria", "fips": "48039", "lat": 29.1652, "lon": -95.4349},
+        {"name": "Webb", "fips": "48479", "lat": 27.7319, "lon": -99.4965},
+        {"name": "McLennan", "fips": "48309", "lat": 31.5493, "lon": -97.1467},
+        {"name": "Bell", "fips": "48027", "lat": 31.0693, "lon": -97.4789},
+        {"name": "Galveston", "fips": "48167", "lat": 29.4404, "lon": -94.8851},
+        {"name": "Lubbock", "fips": "48303", "lat": 33.6151, "lon": -101.8552},
+        {"name": "Jefferson", "fips": "48245", "lat": 29.9483, "lon": -94.0307},
+        {"name": "Smith", "fips": "48423", "lat": 32.3985, "lon": -95.2609},
+        {"name": "Brazos", "fips": "48041", "lat": 30.6630, "lon": -96.2983},
+        {"name": "Hays", "fips": "48209", "lat": 30.0585, "lon": -98.0336},
+        {"name": "Johnson", "fips": "48251", "lat": 32.3974, "lon": -97.3697},
+        {"name": "Ector", "fips": "48135", "lat": 31.8876, "lon": -102.4448},
+        {"name": "Midland", "fips": "48329", "lat": 31.9210, "lon": -102.0132},
+        {"name": "Taylor", "fips": "48441", "lat": 32.3285, "lon": -99.8645},
+        {"name": "Potter", "fips": "48375", "lat": 35.3962, "lon": -101.8767},
+        {"name": "Guadalupe", "fips": "48187", "lat": 29.6299, "lon": -97.9586},
+        {"name": "Wichita", "fips": "48485", "lat": 33.9693, "lon": -98.6978},
+        {"name": "Tom Green", "fips": "48451", "lat": 31.4306, "lon": -100.4608},
+        {"name": "Randall", "fips": "48381", "lat": 34.9820, "lon": -101.9171},
+        {"name": "Gregg", "fips": "48183", "lat": 32.4899, "lon": -94.8266},
+        {"name": "Comal", "fips": "48091", "lat": 29.8102, "lon": -98.2964},
+        {"name": "Kaufman", "fips": "48257", "lat": 32.5882, "lon": -96.2892},
+        {"name": "Ellis", "fips": "48139", "lat": 32.3507, "lon": -96.7892},
+        {"name": "Rockwall", "fips": "48397", "lat": 32.8945, "lon": -96.4097},
+        {"name": "Cherokee", "fips": "48073", "lat": 31.8518, "lon": -95.1541},
+        {"name": "Angelina", "fips": "48005", "lat": 31.2304, "lon": -94.6191}
+    ]
     
-    # Texas bounding box
-    min_lat, max_lat = 26.0, 36.5
-    min_lon, max_lon = -106.5, -93.5
-    
-    # Create grid
-    lat = min_lat
-    while lat <= max_lat:
-        lon = min_lon
-        while lon <= max_lon:
-            grid_points.append({
-                "name": f"Grid_{len(grid_points)}",
-                "lat": round(lat, 2),
-                "lon": round(lon, 2)
-            })
-            lon += 1.5  # ~100 miles spacing
-        lat += 1.5
-    
-    print(f"Sampling {len(grid_points)} points across Texas...")
+    print(f"Sampling {len(texas_counties)} counties across Texas...")
     
     weather_risks = []
     
     async with httpx.AsyncClient(timeout=30.0) as client:
-        # Process in batches to avoid overwhelming the API
-        for point in grid_points:
+        for county in texas_counties:
             try:
-                # Get weather data from Open-Meteo
-                url = f"https://api.open-meteo.com/v1/forecast?latitude={point['lat']}&longitude={point['lon']}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation&temperature_unit=fahrenheit&wind_speed_unit=mph"
+                url = f"https://api.open-meteo.com/v1/forecast?latitude={county['lat']}&longitude={county['lon']}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation&temperature_unit=fahrenheit&wind_speed_unit=mph"
                 
                 response = await client.get(url)
                 if response.status_code == 200:
                     data = response.json()
                     current = data.get("current", {})
                     
-                    # Get weather values
                     temp = current.get("temperature_2m", 70)
                     humidity = current.get("relative_humidity_2m", 50)
                     wind_speed = current.get("wind_speed_10m", 5)
                     precipitation = current.get("precipitation", 0)
                     
-                    # FIRE RISK CALCULATION FORMULA:
-                    # Based on Fire Weather Index principles
-                    
+                    # FIRE RISK CALCULATION
                     risk_score = 0
                     
-                    # 1. TEMPERATURE FACTOR (max 40 points)
-                    # Higher temps dry out vegetation and increase fire intensity
-                    if temp > 75:
-                        risk_score += 10
-                    if temp > 85:
-                        risk_score += 15  # Total: 25
-                    if temp > 95:
-                        risk_score += 15  # Total: 40
+                    # Temperature factor (max 40)
+                    if temp > 75: risk_score += 10
+                    if temp > 85: risk_score += 15
+                    if temp > 95: risk_score += 30
                     
-                    # 2. HUMIDITY FACTOR (max 35 points)
-                    # Low humidity = dry conditions = fires spread faster
-                    if humidity < 40:
-                        risk_score += 10
-                    if humidity < 25:
-                        risk_score += 15  # Total: 25
-                    if humidity < 15:
-                        risk_score += 10  # Total: 35
+                    # Humidity factor (max 35)
+                    if humidity < 40: risk_score += 10
+                    if humidity < 25: risk_score += 15
+                    if humidity < 15: risk_score += 20
                     
-                    # 3. WIND FACTOR (max 30 points)
-                    # Wind spreads fires and makes them unpredictable
-                    if wind_speed > 10:
-                        risk_score += 10
-                    if wind_speed > 20:
-                        risk_score += 10  # Total: 20
-                    if wind_speed > 30:
-                        risk_score += 10  # Total: 30
+                    # Wind factor (max 30)
+                    if wind_speed > 10: risk_score += 10
+                    if wind_speed > 20: risk_score += 30
+                    if wind_speed > 30: risk_score += 40
                     
-                    # 4. PRECIPITATION PENALTY (reduces risk)
-                    # Recent rain = wet vegetation = lower fire risk
-                    if precipitation > 0:
-                        risk_score -= 20  # Recent rain reduces risk
+                    # Precipitation penalty
+                    if precipitation > 0: risk_score -= 20
                     
-                    # Keep score in 0-100 range
                     risk_score = max(0, min(100, risk_score))
                     
-                    # Determine risk level and color
-                    # RISK LEVELS:
-                    # 0-25: LOW (green)
-                    # 26-50: MODERATE (yellow/orange)  
-                    # 51-75: HIGH (orange/red)
-                    # 76-100: EXTREME (dark red)
-                    
+                    # Determine risk level
                     if risk_score >= 76:
                         risk_level = "extreme"
-                        color = "#8B0000"  # Dark red
-                        radius_km = 60
+                        color = "#8B0000"
                     elif risk_score >= 51:
                         risk_level = "high"
-                        color = "#FF4500"  # Orange-red
-                        radius_km = 50
+                        color = "#FF4500"
                     elif risk_score >= 26:
                         risk_level = "moderate"
-                        color = "#FFA500"  # Orange
-                        radius_km = 40
+                        color = "#FFA500"
                     else:
                         risk_level = "low"
-                        color = "#90EE90"  # Light green
-                        radius_km = 30
+                        color = "#90EE90"
                     
                     weather_risks.append({
                         "type": "Feature",
                         "geometry": {
                             "type": "Point",
-                            "coordinates": [point["lon"], point["lat"]]
+                            "coordinates": [county["lon"], county["lat"]]
                         },
                         "properties": {
                             "type": "weather_risk",
-                            "location": f"Grid Point ({point['lat']}, {point['lon']})",
+                            "county": county["name"],
+                            "fips": county["fips"],
                             "risk_level": risk_level,
                             "risk_score": risk_score,
                             "color": color,
                             "temperature": round(temp, 1),
                             "humidity": round(humidity, 1),
                             "wind_speed": round(wind_speed, 1),
-                            "precipitation": round(precipitation, 2),
-                            "radius_km": radius_km
+                            "precipitation": round(precipitation, 2)
                         }
                     })
                     
             except Exception as e:
-                print(f"Error fetching weather for point {point}: {e}")
+                print(f"Error fetching weather for {county['name']}: {e}")
                 continue
             
-            # Small delay to be nice to the API
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
     
-    print(f"Successfully retrieved {len(weather_risks)} risk zones")
+    print(f"Successfully retrieved {len(weather_risks)} county risk zones")
     return weather_risks
 
 def calculate_risk_zones(fires: List[Dict], weather_risk: List[Dict]) -> List[Dict]:
@@ -539,6 +533,48 @@ async def get_wildfire_alerts():
         "timestamp": datetime.utcnow().isoformat()
     }
 
+@app.get("/api/wildfire/counties")
+async def get_texas_counties_geojson():
+    """
+    Get simplified Texas county boundaries as GeoJSON
+    This is a minimal subset for demo - in production use full county shapefile
+    """
+    # Simplified county boundaries (using approximate bounding boxes)
+    # In production, you'd load actual county shapefiles
+    counties_geojson = {
+        "type": "FeatureCollection",
+        "features": []
+    }
+    
+    # Major counties with approximate boundaries
+    major_counties = [
+        {"name": "Harris", "bounds": [[-95.8, 29.5], [-95.0, 30.2]]},
+        {"name": "Dallas", "bounds": [[-97.1, 32.5], [-96.4, 33.0]]},
+        {"name": "Bexar", "bounds": [[-98.9, 29.1], [-98.2, 29.8]]},
+        {"name": "Travis", "bounds": [[-98.2, 30.0], [-97.4, 30.6]]},
+        {"name": "Tarrant", "bounds": [[-97.6, 32.5], [-96.9, 33.1]]},
+    ]
+    
+    for county in major_counties:
+        # Create a simple rectangle polygon for each county
+        bounds = county["bounds"]
+        counties_geojson["features"].append({
+            "type": "Feature",
+            "properties": {"name": county["name"]},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [bounds[0][0], bounds[0][1]],  # SW corner
+                    [bounds[1][0], bounds[0][1]],  # SE corner
+                    [bounds[1][0], bounds[1][1]],  # NE corner
+                    [bounds[0][0], bounds[1][1]],  # NW corner
+                    [bounds[0][0], bounds[0][1]]   # Close polygon
+                ]]
+            }
+        })
+    
+    return counties_geojson
+
 @app.get("/api/wildfire/stats")
 async def get_wildfire_stats():
     """
@@ -563,5 +599,6 @@ async def get_wildfire_stats():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
