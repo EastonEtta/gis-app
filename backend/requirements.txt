@@ -6,4 +6,5 @@ shapely==2.0.2
 pyproj==3.6.1
 psycopg2-binary==2.9.9
 python-multipart==0.0.6
+httpx==0.25.2
 pydantic==2.5.0
