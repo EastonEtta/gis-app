@@ -93,6 +93,38 @@
             font-size: 0.75rem;
             color: #7f8c8d;
         }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        }
+        .loading-overlay.active {
+            display: flex;
+        }
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #e74c3c;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .loading-text {
+            color: white;
+            margin-top: 1rem;
+            font-size: 1.1rem;
+        }
         button {
             background: #3498db;
             color: white;
@@ -192,6 +224,13 @@
         </button>
     </div>
     
+    <div class="loading-overlay" id="loading-overlay">
+        <div style="text-align: center;">
+            <div class="spinner"></div>
+            <div class="loading-text">Loading wildfire data...</div>
+        </div>
+    </div>
+    
     <div id="sidebar">
         <button class="close-btn" onclick="toggleAddPoint()">×</button>
         <h3 style="margin-bottom: 1rem; color: #2c3e50;">Add New Point</h3>
@@ -215,7 +254,7 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <script>
-        const API_URL = 'https://gis-app-production.up.railway.app/api';
+        const API_URL = 'https://gis-app-production.up.railway.app';
         
         // Initialize map - centered on Texas
         const map = L.map('map').setView([31.0, -100.0], 6);
@@ -386,7 +425,12 @@
         }
         
         async function loadWildfireData() {
+            const loadingOverlay = document.getElementById('loading-overlay');
+            
             try {
+                // Show loading spinner
+                loadingOverlay.classList.add('active');
+                
                 // Load risk data
                 const riskResponse = await fetch(`${API_URL}/wildfire/risk`);
                 const riskData = await riskResponse.json();
@@ -428,16 +472,21 @@
                             radius: props.radius_km * 1000,
                             fillColor: props.color,
                             color: props.color,
-                            weight: 2,
-                            opacity: 0.5,
-                            fillOpacity: 0.2
+                            weight: 1,
+                            opacity: 0.4,
+                            fillOpacity: 0.25
                         }).bindPopup(`
-                            <strong>${props.location}</strong><br>
-                            Risk Level: <strong style="color: ${props.color}">${props.risk_level.toUpperCase()}</strong><br>
-                            Temperature: ${props.temperature}°F<br>
-                            Humidity: ${props.humidity}%<br>
-                            Wind Speed: ${props.wind_speed} mph<br>
-                            Risk Score: ${props.risk_score}/100
+                            <strong>Fire Risk Zone</strong><br>
+                            <strong style="color: ${props.color}">${props.risk_level.toUpperCase()}</strong> Risk<br>
+                            <hr style="margin: 0.5rem 0;">
+                            <strong>Weather Conditions:</strong><br>
+                            🌡️ Temperature: ${props.temperature}°F<br>
+                            💧 Humidity: ${props.humidity}%<br>
+                            💨 Wind Speed: ${props.wind_speed} mph<br>
+                            🌧️ Precipitation: ${props.precipitation}"<br>
+                            <hr style="margin: 0.5rem 0;">
+                            <strong>Risk Score: ${props.risk_score}/100</strong><br>
+                            <small>Lat: ${coords[1].toFixed(2)}, Lon: ${coords[0].toFixed(2)}</small>
                         `).addTo(wildfireLayer);
                     }
                 });
@@ -481,7 +530,10 @@
                 
             } catch (error) {
                 console.error('Error loading wildfire data:', error);
-                alert('Failed to load wildfire data. Make sure the API is running.');
+                alert('Failed to load wildfire data. Check console for details.');
+            } finally {
+                // Hide loading spinner
+                loadingOverlay.classList.remove('active');
             }
         }
         
@@ -493,5 +545,3 @@
     </script>
 </body>
 </html>
-
-
